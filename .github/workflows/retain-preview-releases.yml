@@ -1,0 +1,70 @@
+name: Retain latest Preview releases
+
+on:
+  release:
+    types: [published, prereleased]
+  # Fallback: release events created with GITHUB_TOKEN do not start another workflow.
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only show which Preview releases would be deleted"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: preview-release-retention-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Keep the two newest Preview releases
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || startsWith(github.event.release.tag_name, 'preview-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retain two newest Preview releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t preview_tags < <(
+            gh release list --repo "$GH_REPO" --limit 1000 \
+              --json tagName,isPrerelease,publishedAt \
+              --jq '[.[] | select(.isPrerelease == true and (.tagName | startswith("preview-")))] | sort_by(.publishedAt) | reverse | .[].tagName'
+          )
+
+          echo "Found ${#preview_tags[@]} published Preview releases."
+
+          if (( ${#preview_tags[@]} <= 2 )); then
+            echo "Two or fewer Preview releases exist. Nothing to delete."
+            exit 0
+          fi
+
+          echo "Keeping:"
+          printf '  %s\n' "${preview_tags[@]:0:2}"
+
+          delete_tags=("${preview_tags[@]:2}")
+
+          echo "Releases selected for deletion:"
+          printf '  %s\n' "${delete_tags[@]}"
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run enabled. No releases were deleted."
+            exit 0
+          fi
+
+          for tag in "${delete_tags[@]}"; do
+            echo "Deleting release: $tag"
+            gh release delete "$tag" --repo "$GH_REPO" --yes
+          done
+
+          echo "Retention complete. Git tags were left untouched."
