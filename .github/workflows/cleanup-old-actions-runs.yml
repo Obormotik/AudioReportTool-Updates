@@ -24,8 +24,8 @@ jobs:
           runs_to_delete="$(
             gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" \
               --jq '.workflow_runs[] | select(.status == "completed") | [.workflow_id, .id, .created_at] | @tsv' \
-              | sort -t $'\\t' -k1,1n -k3,3r -k2,2nr \
-              | awk -F '\\t' -v current="${CURRENT_RUN_ID}" '
+              | sort -t $'\t' -k1,1n -k3,3r -k2,2nr \
+              | awk -F '\t' -v current="${CURRENT_RUN_ID}" '
                   $2 == current { next }
                   {
                     count[$1]++
